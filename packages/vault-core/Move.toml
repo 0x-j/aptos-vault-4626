@@ -1,0 +1,15 @@
+[package]
+name = "VaultCore"
+version = "1.0.0"
+authors = []
+
+[addresses]
+vault_core_addr = "_"
+
+[dev-addresses]
+vault_core_addr = "0x999"
+
+[dependencies]
+AptosFramework = { git = "https://github.com/aptos-labs/aptos-framework.git", rev = "mainnet", subdir = "aptos-framework" }
+
+[dev-dependencies]
