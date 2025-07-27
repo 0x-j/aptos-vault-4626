@@ -43,22 +43,24 @@ The implementation provides:
 
 #### ERC-4626 Functions
 
-**Implemented:**
+**✅ Complete Implementation:**
+
+**Core Operations:**
 
 - `create_vault()` - Creates a new vault for an underlying token
-- `deposit()` - Deposits assets and mints shares
+- `deposit(assets)` - Deposits assets and mints shares (floor rounding)
+- `mint(shares)` - Mints shares and collects assets (ceil rounding)
+- `withdraw(assets, receiver)` - Withdraws assets and burns shares (ceil rounding)
+- `redeem(shares, receiver)` - Redeems shares and returns assets (floor rounding)
+
+**View Functions:**
+
 - `asset()` - Returns the underlying asset
 - `total_assets()` - Returns total assets in vault
-- `max_deposit()` - Returns maximum deposit allowed
-- `preview_deposit()` - Previews shares for deposit
-
-**Stubbed (abort 0):**
-
-- `mint()`, `withdraw()`, `redeem()`
-- `convert_to_shares()`, `convert_to_assets()`
-- `max_mint()`, `preview_mint()`
-- `max_withdraw()`, `preview_withdraw()`
-- `max_redeem()`, `preview_redeem()`
+- `convert_to_shares()` - Converts assets to shares (floor rounding)
+- `convert_to_assets()` - Converts shares to assets (floor rounding)
+- `max_deposit()`, `max_mint()`, `max_withdraw()`, `max_redeem()` - Maximum operation limits
+- `preview_deposit()`, `preview_mint()`, `preview_withdraw()`, `preview_redeem()` - Preview functions
 
 #### Custom Function Support
 
@@ -69,6 +71,86 @@ The vault supports custom implementations of all ERC-4626 functions through lamb
 - `CreateVaultEvent` - Emitted when vault is created
 - `DepositEvent` - Emitted on deposits
 - `WithdrawEvent` - Emitted on withdrawals
+
+## Architecture: Aptos vs EVM Approach
+
+### EVM ERC-4626 Pattern
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Vault A       │    │   Vault B       │    │   Vault C       │
+│   Contract      │    │   Contract      │    │   Contract      │
+├─────────────────┤    ├─────────────────┤    ├─────────────────┤
+│ - deposit()     │    │ - deposit()     │    │ - deposit()     │
+│ - withdraw()    │    │ - withdraw()    │    │ - withdraw()    │
+│ - mint()        │    │ - mint()        │    │ - mint()        │
+│ - redeem()      │    │ - redeem()      │    │ - redeem()      │
+│ - asset: USDC   │    │ - asset: WETH   │    │ - asset: DAI    │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+      │                        │                        │
+      ▼                        ▼                        ▼
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│ DeFi Protocol   │    │ DeFi Protocol   │    │ DeFi Protocol   │
+│ integrates with │    │ integrates with │    │ integrates with │
+│ each contract   │    │ each contract   │    │ each contract   │
+│ separately      │    │ separately      │    │ separately      │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+### Aptos Approach (This Implementation)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Single VaultCore Contract                    │
+├─────────────────────────────────────────────────────────────────┤
+│                        Public Interface                         │
+│  - create_vault()                                               │
+│  - deposit(vault_token, assets)                                 │
+│  - withdraw(vault_token, assets, receiver)                      │
+│  - mint(vault_token, shares)                                    │
+│  - redeem(vault_token, shares, receiver)                        │
+│  - [all view functions]                                         │
+└─────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        Vault Instances                          │
+├─────────────────┬─────────────────┬─────────────────┬───────────┤
+│   Vault A       │   Vault B       │   Vault C       │    ...    │
+│   Object        │   Object        │   Object        │           │
+├─────────────────┼─────────────────┼─────────────────┼───────────┤
+│ State:          │ State:          │ State:          │           │
+│ - asset: USDC   │ - asset: WETH   │ - asset: DAI    │           │
+│ - total_assets  │ - total_assets  │ - total_assets  │           │
+│                 │                 │                 │           │
+│ Custom Funcs:   │ Custom Funcs:   │ Custom Funcs:   │           │
+│ - λ deposit     │ - λ deposit     │ - λ deposit     │           │
+│ - λ withdraw    │ - λ withdraw    │ - λ withdraw    │           │
+│ - λ max_*       │ - λ max_*       │ - λ max_*       │           │
+└─────────────────┴─────────────────┴─────────────────┴───────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      DeFi Integration                           │
+│                                                                 │
+│  DeFi protocols integrate with ONE contract address:            │
+│  - Single interface to learn                                    │
+│  - Consistent function signatures                               │
+│  - Pass vault_token parameter to specify which vault            │
+│  - Same contract handles all vault types                        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Key Architectural Differences
+
+| Aspect                  | EVM ERC-4626                                       | Aptos Implementation                       |
+| ----------------------- | -------------------------------------------------- | ------------------------------------------ |
+| **Contract Deployment** | Each vault = new contract deployment               | All vaults use same contract               |
+| **DeFi Integration**    | Must integrate with each vault contract separately | Single contract interface for all vaults   |
+| **Customization**       | Override contract functions                        | Lambda functions in VaultFunctions struct  |
+| **Gas/Fees**            | Deployment cost per vault                          | Only object creation cost                  |
+| **Discoverability**     | Find vault contracts across network                | Query single contract for all vaults       |
+| **Upgrades**            | Each vault contract needs upgrade                  | Single contract upgrade affects all vaults |
 
 ## Development Commands
 
@@ -99,26 +181,90 @@ The vault supports custom implementations of all ERC-4626 functions through lamb
 - Address: `vault_core_addr = "_"` (mainnet), `0x999` (dev)
 - Dependencies: AptosFramework (mainnet branch)
 
-## Current State
+## Implementation Status
 
-This is a work-in-progress implementation:
+🎉 **Complete ERC-4626 Implementation:**
 
-✅ **Completed:**
+✅ **Core Functions:**
 
-- Basic vault creation and structure
-- Deposit functionality with events
-- Asset and total assets view functions
-- Customizable function framework with lambdas
-- Default implementations for core functions
+- `create_vault()` - Vault factory with customizable behavior
+- `deposit()` - Assets → Shares (user-favorable rounding)
+- `mint()` - Shares → Assets (protocol-favorable rounding)
+- `withdraw()` - Assets out → Shares burned (protocol-favorable rounding)
+- `redeem()` - Shares → Assets (user-favorable rounding)
 
-🚧 **In Progress/TODO:**
+✅ **View Functions:**
 
-- Complete mint, withdraw, redeem functions
-- Implement convert_to_shares/convert_to_assets
-- Add proper rounding logic
-- Complete all preview functions
-- Add comprehensive tests
-- Implement max\_\* functions for mint/withdraw/redeem
+- `convert_to_shares()` / `convert_to_assets()` - Conversion utilities
+- `max_*()` functions - Operation limits with customizable logic
+- `preview_*()` functions - Preview calculations with proper rounding
+- `asset()` / `total_assets()` - Basic vault information
+
+✅ **Advanced Features:**
+
+- **Custom Rounding Logic:** Implements OpenZeppelin-compatible rounding with overflow protection
+- **Lambda Customization:** Each vault can override any function behavior
+- **Inflation Attack Protection:** Virtual assets/shares mechanism
+- **Event System:** Comprehensive event emission for all operations
+- **Error Handling:** Proper validation and error messages
+
+✅ **DeFi Integration Ready:**
+
+- Standard ERC-4626 interface for easy protocol integration
+- Single contract address for all vault interactions
+- Consistent function signatures across all vault types
+
+🚧 **Next Steps:**
+
+- Add comprehensive test suite
+- Deploy to testnet/mainnet
+- Create integration examples for DeFi protocols
+
+## DeFi Integration Guide
+
+### For Vault Creators
+
+```move
+// Create a vault with custom logic
+vault_token::create_vault(
+    &creator_signer,
+    underlying_asset,
+    option::some(custom_convert_to_assets_fn),
+    option::some(custom_convert_to_shares_fn),
+    option::some(custom_preview_deposit_fn),
+    // ... other custom functions
+);
+```
+
+### For DeFi Protocols
+
+```move
+// Single contract integration - works with ALL vaults
+module defi_protocol {
+    public fun integrate_with_vault(
+        user: &signer,
+        vault_token: Object<Metadata>
+    ) {
+        // Get vault info
+        let underlying = vault_token::asset(vault_token);
+        let total_assets = vault_token::total_assets(vault_token);
+
+        // Deposit into vault
+        let shares = vault_token::deposit(user, underlying, vault_token, amount);
+
+        // Later: withdraw from vault
+        let withdrawn = vault_token::withdraw(user, underlying, vault_token, amount, receiver);
+    }
+}
+```
+
+### Advantages for DeFi Ecosystem
+
+1. **Single Integration Point:** Learn one interface, work with all vaults
+2. **Predictable Behavior:** All vaults follow ERC-4626 standard
+3. **Easy Discovery:** Query one contract for all available vaults
+4. **Cost Efficiency:** No need to track multiple contract addresses
+5. **Consistent Events:** Standardized event structure across all vaults
 
 ## Technical Notes
 
