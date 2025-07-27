@@ -15,6 +15,8 @@ module vault_core_addr::vault_token {
     const ERR_UNDERLYING_TOKEN_MISMATCH: u64 = 1;
     /// Exceeded max deposit
     const ERR_EXCEEDED_MAX_DEPOSIT: u64 = 2;
+    /// Exceeded max mint
+    const ERR_EXCEEDED_MAX_MINT: u64 = 3;
 
     const MAX_U64: u64 = 18446744073709551615;
 
@@ -203,8 +205,46 @@ module vault_core_addr::vault_token {
         shares
     }
 
-    public fun mint(sender: &signer, shares: u64) {
-        abort 0
+    public fun mint(
+        sender: &signer,
+        underlying_token: Object<Metadata>,
+        vault_token: Object<Metadata>,
+        shares: u64
+    ): u64 acquires VaultState, VaultFunctions, VaultController {
+        let sender_addr = signer::address_of(sender);
+        let vault_addr = object::object_address(&vault_token);
+        let vault_state = borrow_global_mut<VaultState>(vault_addr);
+        assert_underlying_token_is_matched(underlying_token, vault_state);
+
+        let max_shares = max_mint(vault_token, sender_addr);
+        assert!(shares <= max_shares, ERR_EXCEEDED_MAX_MINT);
+
+        let assets = preview_mint(vault_token, shares);
+        
+        primary_fungible_store::transfer(sender, underlying_token, vault_addr, assets);
+        vault_state.total_underlying += assets;
+
+        let vault_controller =
+            borrow_global<VaultController>(object::object_address(&vault_token));
+        fungible_asset::mint_to(
+            &vault_controller.mint_ref,
+            primary_fungible_store::ensure_primary_store_exists(
+                sender_addr, vault_token
+            ),
+            shares
+        );
+
+        event::emit(
+            DepositEvent {
+                sender: sender_addr,
+                vault_token,
+                underlying_token,
+                assets,
+                shares
+            }
+        );
+
+        assets
     }
 
     public fun withdraw(sender: &signer, assets: u64) {
@@ -231,16 +271,20 @@ module vault_core_addr::vault_token {
 
     #[view]
     public fun convert_to_shares(
-        vault_token: Object<Metadata>, amount: u64
-    ): u64 {
-        abort 0
+        vault_token: Object<Metadata>, assets: u64
+    ): u64 acquires VaultFunctions {
+        let vault_functions =
+            borrow_global<VaultFunctions>(object::object_address(&vault_token));
+        (vault_functions.convert_to_shares) (vault_token, assets)
     }
 
     #[view]
     public fun convert_to_assets(
         vault_token: Object<Metadata>, shares: u64
-    ): u64 {
-        abort 0
+    ): u64 acquires VaultFunctions {
+        let vault_functions =
+            borrow_global<VaultFunctions>(object::object_address(&vault_token));
+        (vault_functions.convert_to_assets) (vault_token, shares)
     }
 
     #[view]
@@ -260,13 +304,17 @@ module vault_core_addr::vault_token {
     }
 
     #[view]
-    public fun max_mint(vault_token: Object<Metadata>): u64 {
-        abort 0
+    public fun max_mint(vault_token: Object<Metadata>, owner: address): u64 acquires VaultFunctions {
+        let vault_functions =
+            borrow_global<VaultFunctions>(object::object_address(&vault_token));
+        (vault_functions.max_mint) (vault_token, owner)
     }
 
     #[view]
-    public fun preview_mint(vault_token: Object<Metadata>, amount: u64): u64 {
-        abort 0
+    public fun preview_mint(vault_token: Object<Metadata>, shares: u64): u64 acquires VaultFunctions {
+        let vault_functions =
+            borrow_global<VaultFunctions>(object::object_address(&vault_token));
+        (vault_functions.preview_mint) (vault_token, shares)
     }
 
     #[view]
@@ -301,8 +349,8 @@ module vault_core_addr::vault_token {
 
     public fun default_convert_to_assets(
         vault_token: Object<Metadata>, shares: u64
-    ): u64 {
-        abort 0
+    ): u64 acquires VaultState {
+        convert_to_assets_internal(vault_token, shares, Rounding::Floor)
     }
 
     public fun default_max_deposit(
@@ -318,15 +366,15 @@ module vault_core_addr::vault_token {
     }
 
     public fun default_max_mint(
-        vault_token: Object<Metadata>, owner: address
+        _vault_token: Object<Metadata>, _owner: address
     ): u64 {
-        abort 0
+        MAX_U64
     }
 
     public fun default_preview_mint(
-        vault_token: Object<Metadata>, assets: u64
-    ): u64 {
-        abort 0
+        vault_token: Object<Metadata>, shares: u64
+    ): u64 acquires VaultState {
+        convert_to_assets_internal(vault_token, shares, Rounding::Ceil)
     }
 
     public fun default_max_withdraw(
