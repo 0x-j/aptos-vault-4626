@@ -372,10 +372,17 @@ module vault_core_addr::vault_token {
         if (total_assets == 0) {
             return assets;
         };
-        math64::mul_div(
+
+        // Add virtual assets/shares for inflation attack protection (like OpenZeppelin)
+        let virtual_assets = 1;
+        let virtual_shares = 1; // Could be 10^decimalsOffset like OpenZeppelin
+
+        mul_div_with_rounding(
             assets,
-            *fungible_asset::supply(vault_token).borrow_with_default(&0) as u64,
-            total_assets
+            (*fungible_asset::supply(vault_token).borrow_with_default(&0) as u64)
+                + virtual_shares,
+            total_assets + virtual_assets,
+            rounding
         )
     }
 
@@ -387,11 +394,37 @@ module vault_core_addr::vault_token {
         if (total_assets == 0) {
             return shares;
         };
-        math64::mul_div(
+
+        let virtual_assets = 1;
+        let virtual_shares = 1;
+        mul_div_with_rounding(
             shares,
-            total_assets,
-            *fungible_asset::supply(vault_token).borrow_with_default(&0) as u64
+            total_assets + virtual_assets,
+            (*fungible_asset::supply(vault_token).borrow_with_default(&0) as u64)
+                + virtual_shares,
+            rounding
         )
+    }
+
+    fun mul_div_with_rounding(
+        a: u64, b: u64, c: u64, rounding: Rounding
+    ): u64 {
+        match(rounding) {
+            Rounding::Floor => math64::mul_div(a, b, c),
+            Rounding::Ceil => {
+                let result = math64::mul_div(a, b, c);
+                // Add 1 if there's a remainder
+                if ((a * b) % c != 0) { result + 1 }
+                else { result }
+            },
+            Rounding::Trunc => math64::mul_div(a, b, c), // Same as floor for positive numbers
+            Rounding::Expand => {
+                // Round away from zero - for positive numbers, same as ceil
+                let result = math64::mul_div(a, b, c);
+                if ((a * b) % c != 0) { result + 1 }
+                else { result }
+            }
+        }
     }
 
     // ========================= Unit Tests Helper ================================== //
