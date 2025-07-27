@@ -153,7 +153,7 @@ module vault_core_addr::vault_token {
 
         event::emit(
             CreateVaultEvent {
-                sender: signer::address_of(sender), 
+                sender: signer::address_of(sender),
                 vault_token: object::object_from_constructor_ref(
                     vault_token_constructor_ref
                 ),
@@ -207,7 +207,7 @@ module vault_core_addr::vault_token {
         abort 0
     }
 
-    public fun withdraw(sender: &signer, shares: u64) {
+    public fun withdraw(sender: &signer, assets: u64) {
         abort 0
     }
 
