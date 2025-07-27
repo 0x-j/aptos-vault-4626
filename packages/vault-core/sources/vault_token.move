@@ -17,6 +17,12 @@ module vault_core_addr::vault_token {
     const ERR_EXCEEDED_MAX_DEPOSIT: u64 = 2;
     /// Exceeded max mint
     const ERR_EXCEEDED_MAX_MINT: u64 = 3;
+    /// Exceeded max withdraw
+    const ERR_EXCEEDED_MAX_WITHDRAW: u64 = 4;
+    /// Insufficient shares
+    const ERR_INSUFFICIENT_SHARES: u64 = 5;
+    /// Exceeded max redeem
+    const ERR_EXCEEDED_MAX_REDEEM: u64 = 6;
 
     const MAX_U64: u64 = 18446744073709551615;
 
@@ -247,12 +253,104 @@ module vault_core_addr::vault_token {
         assets
     }
 
-    public fun withdraw(sender: &signer, assets: u64) {
-        abort 0
+    public fun withdraw(
+        sender: &signer,
+        underlying_token: Object<Metadata>,
+        vault_token: Object<Metadata>,
+        assets: u64,
+        receiver: address
+    ): u64 acquires VaultState, VaultFunctions, VaultController {
+        let sender_addr = signer::address_of(sender);
+        let vault_addr = object::object_address(&vault_token);
+        let vault_state = borrow_global_mut<VaultState>(vault_addr);
+        assert_underlying_token_is_matched(underlying_token, vault_state);
+
+        let max_assets = max_withdraw(vault_token, sender_addr);
+        assert!(assets <= max_assets, ERR_EXCEEDED_MAX_WITHDRAW);
+
+        let shares = preview_withdraw(vault_token, assets);
+        
+        // Check if sender has enough shares
+        let sender_balance = primary_fungible_store::balance(sender_addr, vault_token);
+        assert!(sender_balance >= shares, ERR_INSUFFICIENT_SHARES);
+
+        // Burn shares from sender
+        let vault_controller =
+            borrow_global<VaultController>(object::object_address(&vault_token));
+        fungible_asset::burn_from(
+            &vault_controller.burn_ref,
+            primary_fungible_store::primary_store(sender_addr, vault_token),
+            shares
+        );
+
+        // Update vault state
+        vault_state.total_underlying -= assets;
+
+        // Transfer assets to receiver
+        let vault_signer = &object::generate_signer_for_extending(&vault_controller.extend_ref);
+        primary_fungible_store::transfer(vault_signer, underlying_token, receiver, assets);
+
+        event::emit(
+            WithdrawEvent {
+                sender: sender_addr,
+                vault_token,
+                underlying_token,
+                assets,
+                shares
+            }
+        );
+
+        shares
     }
 
-    public fun redeem(sender: &signer, shares: u64) {
-        abort 0
+    public fun redeem(
+        sender: &signer,
+        underlying_token: Object<Metadata>,
+        vault_token: Object<Metadata>,
+        shares: u64,
+        receiver: address
+    ): u64 acquires VaultState, VaultFunctions, VaultController {
+        let sender_addr = signer::address_of(sender);
+        let vault_addr = object::object_address(&vault_token);
+        let vault_state = borrow_global_mut<VaultState>(vault_addr);
+        assert_underlying_token_is_matched(underlying_token, vault_state);
+
+        let max_shares = max_redeem(vault_token, sender_addr);
+        assert!(shares <= max_shares, ERR_EXCEEDED_MAX_REDEEM);
+
+        // Check if sender has enough shares
+        let sender_balance = primary_fungible_store::balance(sender_addr, vault_token);
+        assert!(sender_balance >= shares, ERR_INSUFFICIENT_SHARES);
+
+        let assets = preview_redeem(vault_token, shares);
+        
+        // Burn shares from sender
+        let vault_controller =
+            borrow_global<VaultController>(object::object_address(&vault_token));
+        fungible_asset::burn_from(
+            &vault_controller.burn_ref,
+            primary_fungible_store::primary_store(sender_addr, vault_token),
+            shares
+        );
+
+        // Update vault state
+        vault_state.total_underlying -= assets;
+
+        // Transfer assets to receiver
+        let vault_signer = &object::generate_signer_for_extending(&vault_controller.extend_ref);
+        primary_fungible_store::transfer(vault_signer, underlying_token, receiver, assets);
+
+        event::emit(
+            WithdrawEvent {
+                sender: sender_addr,
+                vault_token,
+                underlying_token,
+                assets,
+                shares
+            }
+        );
+
+        assets
     }
 
     // ======================== Read Functions ========================
@@ -318,25 +416,33 @@ module vault_core_addr::vault_token {
     }
 
     #[view]
-    public fun max_withdraw(vault_token: Object<Metadata>, shares: u64): u64 {
-        abort 0
+    public fun max_withdraw(vault_token: Object<Metadata>, owner: address): u64 acquires VaultFunctions {
+        let vault_functions =
+            borrow_global<VaultFunctions>(object::object_address(&vault_token));
+        (vault_functions.max_withdraw) (vault_token, owner)
     }
 
     #[view]
     public fun preview_withdraw(
-        vault_token: Object<Metadata>, shares: u64
-    ): u64 {
-        abort 0
+        vault_token: Object<Metadata>, assets: u64
+    ): u64 acquires VaultFunctions {
+        let vault_functions =
+            borrow_global<VaultFunctions>(object::object_address(&vault_token));
+        (vault_functions.preview_withdraw) (vault_token, assets)
     }
 
     #[view]
-    public fun max_redeem(vault_token: Object<Metadata>): u64 {
-        abort 0
+    public fun max_redeem(vault_token: Object<Metadata>, owner: address): u64 acquires VaultFunctions {
+        let vault_functions =
+            borrow_global<VaultFunctions>(object::object_address(&vault_token));
+        (vault_functions.max_redeem) (vault_token, owner)
     }
 
     #[view]
-    public fun preview_redeem(vault_token: Object<Metadata>, shares: u64): u64 {
-        abort 0
+    public fun preview_redeem(vault_token: Object<Metadata>, shares: u64): u64 acquires VaultFunctions {
+        let vault_functions =
+            borrow_global<VaultFunctions>(object::object_address(&vault_token));
+        (vault_functions.preview_redeem) (vault_token, shares)
     }
 
     // ========================= Default Implementations ========================= //
@@ -379,26 +485,29 @@ module vault_core_addr::vault_token {
 
     public fun default_max_withdraw(
         vault_token: Object<Metadata>, owner: address
-    ): u64 {
-        abort 0
+    ): u64 acquires VaultState {
+        // Max withdraw is the assets equivalent of user's share balance
+        let user_shares = primary_fungible_store::balance(owner, vault_token);
+        convert_to_assets_internal(vault_token, user_shares, Rounding::Floor)
     }
 
     public fun default_preview_withdraw(
-        vault_token: Object<Metadata>, shares: u64
-    ): u64 {
-        abort 0
+        vault_token: Object<Metadata>, assets: u64
+    ): u64 acquires VaultState {
+        convert_to_shares_internal(vault_token, assets, Rounding::Ceil)
     }
 
     public fun default_max_redeem(
-        vault_token: Object<Metadata>, owner: address
+        _vault_token: Object<Metadata>, owner: address
     ): u64 {
-        abort 0
+        // Max redeem is simply the user's share balance
+        primary_fungible_store::balance(owner, _vault_token)
     }
 
     public fun default_preview_redeem(
         vault_token: Object<Metadata>, shares: u64
-    ): u64 {
-        abort 0
+    ): u64 acquires VaultState {
+        convert_to_assets_internal(vault_token, shares, Rounding::Floor)
     }
 
     // ========================= Helper ========================= //
