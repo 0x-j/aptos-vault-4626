@@ -8,21 +8,31 @@ This project implements the ERC-4626 tokenized vault standard on the Aptos block
 aptos-vault-4626/
 ├── README.md
 └── packages/
-    └── vault-core/
-        ├── Move.toml                 # Package configuration
-        ├── contract_address.txt      # Deployed contract address
+    ├── vault-core/                   # Core vault implementation
+    │   ├── Move.toml                 # Package configuration
+    │   ├── contract_address.txt      # Deployed contract address
+    │   ├── sources/
+    │   │   └── vault_token.move      # Main vault implementation
+    │   ├── tests/
+    │   │   └── test_end_to_end.move  # End-to-end tests
+    │   └── sh_scripts/               # Shell scripts for development
+    │       ├── deploy.sh
+    │       ├── fmt.sh
+    │       ├── get_abis.sh
+    │       ├── init.sh
+    │       ├── test.sh
+    │       └── upgrade.sh
+    └── scripts-only/                 # Integration scripts and examples
+        ├── Move.toml                 # Scripts package configuration
         ├── sources/
-        │   └── vault_token.move      # Main vault implementation
-        ├── tests/
-        │   └── test_end_to_end.move  # End-to-end tests (currently stub)
+        │   └── dummy_module.move     # Minimal module for compilation
         ├── scripts/
-        │   ├── create_2_messages.move
-        │   └── update_message.move
-        └── sh_scripts/               # Shell scripts for development
+        │   └── create_vault.move     # Move script to create vault
+        └── sh_scripts/               # Script execution helpers
             ├── deploy.sh
             ├── fmt.sh
-            ├── get_abis.sh
             ├── init.sh
+            ├── run_create_vault.sh   # Execute vault creation script
             ├── test.sh
             └── upgrade.sh
 ```
@@ -69,8 +79,51 @@ The vault supports custom implementations of all ERC-4626 functions through lamb
 #### Events
 
 - `CreateVaultEvent` - Emitted when vault is created
-- `DepositEvent` - Emitted on deposits
-- `WithdrawEvent` - Emitted on withdrawals
+- `VaultDepositEvent` - Emitted on deposits (assets → shares)
+- `VaultMintEvent` - Emitted on mints (shares → assets)
+- `VaultWithdrawEvent` - Emitted on withdrawals (assets out)
+- `VaultRedeemEvent` - Emitted on redemptions (shares → assets)
+
+## Integration Scripts Package
+
+### `packages/scripts-only/`
+
+This package provides Move scripts and integration examples for interacting with the vault system.
+
+#### Package Configuration
+- **Package Name:** `ScriptsOnly`
+- **Dependencies:** `AptosFramework`, `VaultCore` (local)
+- **Purpose:** Provides executable Move scripts for vault operations
+
+#### Available Scripts
+
+**`create_vault.move`**
+```move
+script {
+    fun create_vault(sender: &signer) {
+        let fa = object::address_to_object(@0xa);
+        vault_token::create_vault(
+            sender,
+            fa,
+            // All optional lambda functions set to none()
+            // Uses default implementations
+        );
+    }
+}
+```
+
+#### Execution Commands
+
+**Create a Vault:**
+```bash
+cd packages/scripts-only
+./sh_scripts/run_create_vault.sh
+```
+
+This script:
+1. Compiles the scripts package with the deployed contract address
+2. Executes the `create_vault` Move script
+3. Creates a vault with default behavior for all functions
 
 ## Architecture: Aptos vs EVM Approach
 
@@ -154,32 +207,42 @@ The vault supports custom implementations of all ERC-4626 functions through lamb
 
 ## Development Commands
 
-### Testing
+### Core Package (vault-core)
 
+**Testing:**
 ```bash
-./packages/vault-core/sh_scripts/test.sh
+cd packages/vault-core
+./sh_scripts/test.sh
 # Runs: aptos move test --dev --language-version 2.2
 ```
 
-### Formatting
-
+**Deployment:**
 ```bash
-./packages/vault-core/sh_scripts/fmt.sh
+cd packages/vault-core
+./sh_scripts/deploy.sh
 ```
 
-### Deployment
-
+**Formatting:**
 ```bash
-./packages/vault-core/sh_scripts/deploy.sh
+cd packages/vault-core
+./sh_scripts/fmt.sh
 ```
 
-## Configuration
+### Scripts Package (scripts-only)
 
-### Move.toml
+**Run Vault Creation Script:**
+```bash
+cd packages/scripts-only
+./sh_scripts/run_create_vault.sh
+```
 
-- Package: VaultCore v1.0.0
-- Address: `vault_core_addr = "_"` (mainnet), `0x999` (dev)
-- Dependencies: AptosFramework (mainnet branch)
+**Package Management:**
+```bash
+cd packages/scripts-only
+./sh_scripts/init.sh      # Initialize configuration
+./sh_scripts/fmt.sh       # Format code
+./sh_scripts/test.sh      # Run tests
+```
 
 ## Implementation Status
 
@@ -259,7 +322,6 @@ module defi_protocol {
 ```
 
 ### Advantages for DeFi Ecosystem
-
 1. **Single Integration Point:** Learn one interface, work with all vaults
 2. **Predictable Behavior:** All vaults follow ERC-4626 standard
 3. **Easy Discovery:** Query one contract for all available vaults
@@ -276,6 +338,16 @@ module defi_protocol {
 
 ## Key Files to Monitor
 
-- `packages/vault-core/sources/vault_token.move` - Main implementation
+**Core Implementation:**
+- `packages/vault-core/sources/vault_token.move` - Main vault implementation
 - `packages/vault-core/tests/test_end_to_end.move` - Test coverage
-- `packages/vault-core/Move.toml` - Package configuration
+- `packages/vault-core/Move.toml` - Core package configuration
+
+**Integration & Scripts:**
+- `packages/scripts-only/scripts/create_vault.move` - Vault creation script
+- `packages/scripts-only/sh_scripts/run_create_vault.sh` - Script execution helper
+- `packages/scripts-only/Move.toml` - Scripts package configuration
+
+**Development:**
+- `packages/vault-core/contract_address.txt` - Deployed contract address
+- `packages/*/sh_scripts/` - Development and deployment scripts

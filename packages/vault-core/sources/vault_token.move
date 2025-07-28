@@ -6,10 +6,19 @@ module vault_core_addr::vault_token {
     use aptos_framework::event;
     use aptos_framework::object::{Self, Object, ExtendRef};
     use aptos_framework::timestamp;
-    use aptos_framework::fungible_asset::{Self, Metadata, TransferRef, MintRef, BurnRef};
+    use aptos_framework::fungible_asset::{
+        Self,
+        FungibleAsset,
+        Metadata,
+        TransferRef,
+        MintRef,
+        BurnRef
+    };
     use aptos_framework::primary_fungible_store;
     use aptos_framework::option::{Self, Option};
     use aptos_framework::string_utils;
+    use aptos_framework::function_info;
+    use aptos_framework::dispatchable_fungible_asset;
 
     /// Underlying token mismatch
     const ERR_UNDERLYING_TOKEN_MISMATCH: u64 = 1;
@@ -33,7 +42,7 @@ module vault_core_addr::vault_token {
         Expand // Away from zero
     }
 
-    struct VaultState has key {
+    struct VaultState has key, store {
         underlying_token: Object<Metadata>,
         total_underlying: u64
     }
@@ -51,7 +60,7 @@ module vault_core_addr::vault_token {
         max_redeem: |Object<Metadata>, address| u64 has store + copy + drop
     }
 
-    struct VaultController has key {
+    struct VaultController has key, store {
         extend_ref: ExtendRef,
         transfer_ref: TransferRef,
         mint_ref: MintRef,
@@ -66,7 +75,7 @@ module vault_core_addr::vault_token {
     }
 
     #[event]
-    struct DepositEvent has store, drop {
+    struct VaultDepositEvent has store, drop {
         sender: address,
         vault_token: Object<Metadata>,
         underlying_token: Object<Metadata>,
@@ -75,7 +84,25 @@ module vault_core_addr::vault_token {
     }
 
     #[event]
-    struct WithdrawEvent has store, drop {
+    struct VaultWithdrawEvent has store, drop {
+        sender: address,
+        vault_token: Object<Metadata>,
+        underlying_token: Object<Metadata>,
+        assets: u64,
+        shares: u64
+    }
+
+    #[event]
+    struct VaultMintEvent has store, drop {
+        sender: address,
+        vault_token: Object<Metadata>,
+        underlying_token: Object<Metadata>,
+        assets: u64,
+        shares: u64
+    }
+
+    #[event]
+    struct VaultRedeemEvent has store, drop {
         sender: address,
         vault_token: Object<Metadata>,
         underlying_token: Object<Metadata>,
@@ -108,12 +135,35 @@ module vault_core_addr::vault_token {
         primary_fungible_store::create_primary_store_enabled_fungible_asset(
             vault_token_constructor_ref,
             option::none(),
+            // todo: replace with actual metadata
             string_utils::format1(&b"vault_{}", fungible_asset::name(underlying_token)),
             string_utils::format1(&b"v{}", fungible_asset::symbol(underlying_token)),
             6,
             string::utf8(b"icon_url"),
             string::utf8(b"project_url")
         );
+
+        // Override the deposit and withdraw function
+        let custom_withdraw =
+            function_info::new_function_info(
+                sender,
+                string::utf8(b"vault_token"),
+                string::utf8(b"custom_withdraw")
+            );
+        let custom_deposit =
+            function_info::new_function_info(
+                sender,
+                string::utf8(b"vault_token"),
+                string::utf8(b"custom_deposit")
+            );
+
+        dispatchable_fungible_asset::register_dispatch_functions(
+            vault_token_constructor_ref,
+            option::some(custom_withdraw),
+            option::some(custom_deposit),
+            option::none()
+        );
+
         move_to(
             vault_token_signer,
             VaultState { underlying_token, total_underlying: 0 }
@@ -170,6 +220,18 @@ module vault_core_addr::vault_token {
         );
     }
 
+    public fun custom_withdraw<T: key>(
+        store: Object<T>, amount: u64, transfer_ref: &TransferRef
+    ): FungibleAsset {
+        fungible_asset::withdraw_with_ref(transfer_ref, store, amount)
+    }
+
+    public fun custom_deposit<T: key>(
+        store: Object<T>, fa: FungibleAsset, transfer_ref: &TransferRef
+    ) {
+        fungible_asset::deposit_with_ref(transfer_ref, store, fa);
+    }
+
     public fun deposit(
         sender: &signer,
         underlying_token: Object<Metadata>,
@@ -199,7 +261,7 @@ module vault_core_addr::vault_token {
         );
 
         event::emit(
-            DepositEvent {
+            VaultDepositEvent {
                 sender: sender_addr,
                 vault_token,
                 underlying_token,
@@ -226,7 +288,7 @@ module vault_core_addr::vault_token {
         assert!(shares <= max_shares, ERR_EXCEEDED_MAX_MINT);
 
         let assets = preview_mint(vault_token, shares);
-        
+
         primary_fungible_store::transfer(sender, underlying_token, vault_addr, assets);
         vault_state.total_underlying += assets;
 
@@ -241,7 +303,7 @@ module vault_core_addr::vault_token {
         );
 
         event::emit(
-            DepositEvent {
+            VaultMintEvent {
                 sender: sender_addr,
                 vault_token,
                 underlying_token,
@@ -269,7 +331,7 @@ module vault_core_addr::vault_token {
         assert!(assets <= max_assets, ERR_EXCEEDED_MAX_WITHDRAW);
 
         let shares = preview_withdraw(vault_token, assets);
-        
+
         // Check if sender has enough shares
         let sender_balance = primary_fungible_store::balance(sender_addr, vault_token);
         assert!(sender_balance >= shares, ERR_INSUFFICIENT_SHARES);
@@ -287,11 +349,17 @@ module vault_core_addr::vault_token {
         vault_state.total_underlying -= assets;
 
         // Transfer assets to receiver
-        let vault_signer = &object::generate_signer_for_extending(&vault_controller.extend_ref);
-        primary_fungible_store::transfer(vault_signer, underlying_token, receiver, assets);
+        let vault_signer =
+            &object::generate_signer_for_extending(&vault_controller.extend_ref);
+        primary_fungible_store::transfer(
+            vault_signer,
+            underlying_token,
+            receiver,
+            assets
+        );
 
         event::emit(
-            WithdrawEvent {
+            VaultWithdrawEvent {
                 sender: sender_addr,
                 vault_token,
                 underlying_token,
@@ -323,7 +391,7 @@ module vault_core_addr::vault_token {
         assert!(sender_balance >= shares, ERR_INSUFFICIENT_SHARES);
 
         let assets = preview_redeem(vault_token, shares);
-        
+
         // Burn shares from sender
         let vault_controller =
             borrow_global<VaultController>(object::object_address(&vault_token));
@@ -337,11 +405,17 @@ module vault_core_addr::vault_token {
         vault_state.total_underlying -= assets;
 
         // Transfer assets to receiver
-        let vault_signer = &object::generate_signer_for_extending(&vault_controller.extend_ref);
-        primary_fungible_store::transfer(vault_signer, underlying_token, receiver, assets);
+        let vault_signer =
+            &object::generate_signer_for_extending(&vault_controller.extend_ref);
+        primary_fungible_store::transfer(
+            vault_signer,
+            underlying_token,
+            receiver,
+            assets
+        );
 
         event::emit(
-            WithdrawEvent {
+            VaultRedeemEvent {
                 sender: sender_addr,
                 vault_token,
                 underlying_token,
@@ -416,7 +490,9 @@ module vault_core_addr::vault_token {
     }
 
     #[view]
-    public fun max_withdraw(vault_token: Object<Metadata>, owner: address): u64 acquires VaultFunctions {
+    public fun max_withdraw(
+        vault_token: Object<Metadata>, owner: address
+    ): u64 acquires VaultFunctions {
         let vault_functions =
             borrow_global<VaultFunctions>(object::object_address(&vault_token));
         (vault_functions.max_withdraw) (vault_token, owner)
@@ -498,10 +574,10 @@ module vault_core_addr::vault_token {
     }
 
     public fun default_max_redeem(
-        _vault_token: Object<Metadata>, owner: address
+        vault_token: Object<Metadata>, owner: address
     ): u64 {
         // Max redeem is simply the user's share balance
-        primary_fungible_store::balance(owner, _vault_token)
+        primary_fungible_store::balance(owner, vault_token)
     }
 
     public fun default_preview_redeem(

@@ -1,0 +1,18 @@
+[package]
+name = "ScriptsOnly"
+version = "1.0.0"
+authors = []
+
+[addresses]
+dummy_addr = "_"
+vault_core_addr = "_"
+
+[dev-addresses]
+dummy_addr = "0x999"
+vault_core_addr = "0x999"
+
+[dependencies]
+AptosFramework = { git = "https://github.com/aptos-labs/aptos-framework.git", rev = "mainnet", subdir = "aptos-framework" }
+VaultCore = { local = "../vault-core" }
+
+[dev-dependencies]
