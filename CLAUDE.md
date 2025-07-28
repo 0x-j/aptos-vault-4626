@@ -1,353 +1,115 @@
-# ERC-4626 Vault Implementation on Aptos
+# ERC-4626 Vault on Aptos - Claude Code Context
 
-This project implements the ERC-4626 tokenized vault standard on the Aptos blockchain using Move language.
+Complete ERC-4626 implementation on Aptos with function value customization and single-contract architecture.
 
-## Project Structure
+## Project Status: 🚧 IN DEVELOPMENT
 
-```
-aptos-vault-4626/
-├── README.md
-└── packages/
-    ├── vault-core/                   # Core vault implementation
-    │   ├── Move.toml                 # Package configuration
-    │   ├── contract_address.txt      # Deployed contract address
-    │   ├── sources/
-    │   │   └── vault_token.move      # Main vault implementation
-    │   ├── tests/
-    │   │   └── test_end_to_end.move  # End-to-end tests
-    │   └── sh_scripts/               # Shell scripts for development
-    │       ├── deploy.sh
-    │       ├── fmt.sh
-    │       ├── get_abis.sh
-    │       ├── init.sh
-    │       ├── test.sh
-    │       └── upgrade.sh
-    └── scripts-only/                 # Integration scripts and examples
-        ├── Move.toml                 # Scripts package configuration
-        ├── sources/
-        │   └── dummy_module.move     # Minimal module for compilation
-        ├── scripts/
-        │   └── create_vault.move     # Move script to create vault
-        └── sh_scripts/               # Script execution helpers
-            ├── deploy.sh
-            ├── fmt.sh
-            ├── init.sh
-            ├── run_create_vault.sh   # Execute vault creation script
-            ├── test.sh
-            └── upgrade.sh
-```
+**✅ Completed:**
 
-## Core Implementation
+- All ERC-4626 functions implemented with proper rounding
+- Function value customization system for vault behavior
+- Integration scripts package for easy deployment
+- OpenZeppelin-compatible security features
 
-### Main Module: `vault_core_addr::vault_token`
+**🚧 TODO before mainnet:**
 
-Located at: `packages/vault-core/sources/vault_token.move`
+- Comprehensive test suite
+- Security audits
+- Integration testing with real fungible assets
+- Performance optimization
+- Documentation and examples
 
-The implementation provides:
+## Reference Implementation
 
-#### Key Structures
+**OpenZeppelin ERC-4626:** https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC20/extensions/ERC4626.sol?utm_source=chatgpt.com
+- Use this as the canonical reference for ERC-4626 behavior
+- Our implementation follows the same rounding strategies and security patterns
+- Function signatures adapted for Move language and Aptos architecture
 
-- **VaultState**: Tracks underlying token and total assets
-- **VaultFunctions**: Customizable function implementations using lambdas
-- **VaultController**: Manages vault operations (extend, transfer, mint, burn refs)
+**Move Function Values:** https://aptos.dev/build/smart-contracts/book/functions#function-values
+- Core Move feature enabling function customization per vault
+- Allows each vault to override default behavior without contract inheritance
 
-#### ERC-4626 Functions
+## Architecture
 
-**✅ Complete Implementation:**
+**Key Innovation:** Single contract handles all vaults (vs EVM's one-contract-per-vault)
 
-**Core Operations:**
+- `vault-core`: Main contract implementation
+- `scripts-only`: Integration scripts and examples
+- All vaults share same contract address with object-based storage
 
-- `create_vault()` - Creates a new vault for an underlying token
-- `deposit(assets)` - Deposits assets and mints shares (floor rounding)
-- `mint(shares)` - Mints shares and collects assets (ceil rounding)
-- `withdraw(assets, receiver)` - Withdraws assets and burns shares (ceil rounding)
-- `redeem(shares, receiver)` - Redeems shares and returns assets (floor rounding)
+## Core Implementation: `packages/vault-core/sources/vault_token.move`
 
-**View Functions:**
-
-- `asset()` - Returns the underlying asset
-- `total_assets()` - Returns total assets in vault
-- `convert_to_shares()` - Converts assets to shares (floor rounding)
-- `convert_to_assets()` - Converts shares to assets (floor rounding)
-- `max_deposit()`, `max_mint()`, `max_withdraw()`, `max_redeem()` - Maximum operation limits
-- `preview_deposit()`, `preview_mint()`, `preview_withdraw()`, `preview_redeem()` - Preview functions
-
-#### Custom Function Support
-
-The vault supports custom implementations of all ERC-4626 functions through lambda parameters in `create_vault()`, allowing for flexible vault behavior customization.
-
-#### Events
-
-- `CreateVaultEvent` - Emitted when vault is created
-- `VaultDepositEvent` - Emitted on deposits (assets → shares)
-- `VaultMintEvent` - Emitted on mints (shares → assets)
-- `VaultWithdrawEvent` - Emitted on withdrawals (assets out)
-- `VaultRedeemEvent` - Emitted on redemptions (shares → assets)
-
-## Integration Scripts Package
-
-### `packages/scripts-only/`
-
-This package provides Move scripts and integration examples for interacting with the vault system.
-
-#### Package Configuration
-- **Package Name:** `ScriptsOnly`
-- **Dependencies:** `AptosFramework`, `VaultCore` (local)
-- **Purpose:** Provides executable Move scripts for vault operations
-
-#### Available Scripts
-
-**`create_vault.move`**
-```move
-script {
-    fun create_vault(sender: &signer) {
-        let fa = object::address_to_object(@0xa);
-        vault_token::create_vault(
-            sender,
-            fa,
-            // All optional lambda functions set to none()
-            // Uses default implementations
-        );
-    }
-}
-```
-
-#### Execution Commands
-
-**Create a Vault:**
-```bash
-cd packages/scripts-only
-./sh_scripts/run_create_vault.sh
-```
-
-This script:
-1. Compiles the scripts package with the deployed contract address
-2. Executes the `create_vault` Move script
-3. Creates a vault with default behavior for all functions
-
-## Architecture: Aptos vs EVM Approach
-
-### EVM ERC-4626 Pattern
-
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Vault A       │    │   Vault B       │    │   Vault C       │
-│   Contract      │    │   Contract      │    │   Contract      │
-├─────────────────┤    ├─────────────────┤    ├─────────────────┤
-│ - deposit()     │    │ - deposit()     │    │ - deposit()     │
-│ - withdraw()    │    │ - withdraw()    │    │ - withdraw()    │
-│ - mint()        │    │ - mint()        │    │ - mint()        │
-│ - redeem()      │    │ - redeem()      │    │ - redeem()      │
-│ - asset: USDC   │    │ - asset: WETH   │    │ - asset: DAI    │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-      │                        │                        │
-      ▼                        ▼                        ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│ DeFi Protocol   │    │ DeFi Protocol   │    │ DeFi Protocol   │
-│ integrates with │    │ integrates with │    │ integrates with │
-│ each contract   │    │ each contract   │    │ each contract   │
-│ separately      │    │ separately      │    │ separately      │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
-
-### Aptos Approach (This Implementation)
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Single VaultCore Contract                    │
-├─────────────────────────────────────────────────────────────────┤
-│                        Public Interface                         │
-│  - create_vault()                                               │
-│  - deposit(vault_token, assets)                                 │
-│  - withdraw(vault_token, assets, receiver)                      │
-│  - mint(vault_token, shares)                                    │
-│  - redeem(vault_token, shares, receiver)                        │
-│  - [all view functions]                                         │
-└─────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        Vault Instances                          │
-├─────────────────┬─────────────────┬─────────────────┬───────────┤
-│   Vault A       │   Vault B       │   Vault C       │    ...    │
-│   Object        │   Object        │   Object        │           │
-├─────────────────┼─────────────────┼─────────────────┼───────────┤
-│ State:          │ State:          │ State:          │           │
-│ - asset: USDC   │ - asset: WETH   │ - asset: DAI    │           │
-│ - total_assets  │ - total_assets  │ - total_assets  │           │
-│                 │                 │                 │           │
-│ Custom Funcs:   │ Custom Funcs:   │ Custom Funcs:   │           │
-│ - λ deposit     │ - λ deposit     │ - λ deposit     │           │
-│ - λ withdraw    │ - λ withdraw    │ - λ withdraw    │           │
-│ - λ max_*       │ - λ max_*       │ - λ max_*       │           │
-└─────────────────┴─────────────────┴─────────────────┴───────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      DeFi Integration                           │
-│                                                                 │
-│  DeFi protocols integrate with ONE contract address:            │
-│  - Single interface to learn                                    │
-│  - Consistent function signatures                               │
-│  - Pass vault_token parameter to specify which vault            │
-│  - Same contract handles all vault types                        │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Key Architectural Differences
-
-| Aspect                  | EVM ERC-4626                                       | Aptos Implementation                       |
-| ----------------------- | -------------------------------------------------- | ------------------------------------------ |
-| **Contract Deployment** | Each vault = new contract deployment               | All vaults use same contract               |
-| **DeFi Integration**    | Must integrate with each vault contract separately | Single contract interface for all vaults   |
-| **Customization**       | Override contract functions                        | Lambda functions in VaultFunctions struct  |
-| **Gas/Fees**            | Deployment cost per vault                          | Only object creation cost                  |
-| **Discoverability**     | Find vault contracts across network                | Query single contract for all vaults       |
-| **Upgrades**            | Each vault contract needs upgrade                  | Single contract upgrade affects all vaults |
-
-## Development Commands
-
-### Core Package (vault-core)
-
-**Testing:**
-```bash
-cd packages/vault-core
-./sh_scripts/test.sh
-# Runs: aptos move test --dev --language-version 2.2
-```
-
-**Deployment:**
-```bash
-cd packages/vault-core
-./sh_scripts/deploy.sh
-```
-
-**Formatting:**
-```bash
-cd packages/vault-core
-./sh_scripts/fmt.sh
-```
-
-### Scripts Package (scripts-only)
-
-**Run Vault Creation Script:**
-```bash
-cd packages/scripts-only
-./sh_scripts/run_create_vault.sh
-```
-
-**Package Management:**
-```bash
-cd packages/scripts-only
-./sh_scripts/init.sh      # Initialize configuration
-./sh_scripts/fmt.sh       # Format code
-./sh_scripts/test.sh      # Run tests
-```
-
-## Implementation Status
-
-🎉 **Complete ERC-4626 Implementation:**
-
-✅ **Core Functions:**
-
-- `create_vault()` - Vault factory with customizable behavior
-- `deposit()` - Assets → Shares (user-favorable rounding)
-- `mint()` - Shares → Assets (protocol-favorable rounding)
-- `withdraw()` - Assets out → Shares burned (protocol-favorable rounding)
-- `redeem()` - Shares → Assets (user-favorable rounding)
-
-✅ **View Functions:**
-
-- `convert_to_shares()` / `convert_to_assets()` - Conversion utilities
-- `max_*()` functions - Operation limits with customizable logic
-- `preview_*()` functions - Preview calculations with proper rounding
-- `asset()` / `total_assets()` - Basic vault information
-
-✅ **Advanced Features:**
-
-- **Custom Rounding Logic:** Implements OpenZeppelin-compatible rounding with overflow protection
-- **Lambda Customization:** Each vault can override any function behavior
-- **Inflation Attack Protection:** Virtual assets/shares mechanism
-- **Event System:** Comprehensive event emission for all operations
-- **Error Handling:** Proper validation and error messages
-
-✅ **DeFi Integration Ready:**
-
-- Standard ERC-4626 interface for easy protocol integration
-- Single contract address for all vault interactions
-- Consistent function signatures across all vault types
-
-🚧 **Next Steps:**
-
-- Add comprehensive test suite
-- Deploy to testnet/mainnet
-- Create integration examples for DeFi protocols
-
-## DeFi Integration Guide
-
-### For Vault Creators
+**Complete Function Set:**
 
 ```move
-// Create a vault with custom logic
-vault_token::create_vault(
-    &creator_signer,
-    underlying_asset,
-    option::some(custom_convert_to_assets_fn),
-    option::some(custom_convert_to_shares_fn),
-    option::some(custom_preview_deposit_fn),
-    // ... other custom functions
-);
+// Core Operations
+create_vault() - Factory with function value customization
+deposit(assets) → shares - Floor rounding (user-favorable)
+mint(shares) → assets - Ceil rounding (protocol-favorable)
+withdraw(assets, receiver) → shares - Ceil rounding
+redeem(shares, receiver) → assets - Floor rounding
+
+// View Functions
+convert_to_shares/assets() - Conversion utilities
+max_*() / preview_*() - Limits and previews with custom logic
+asset() / total_assets() - Basic vault info
 ```
 
-### For DeFi Protocols
+**Key Features:**
+
+- **Function Values:** Each vault customizes behavior via function parameters
+- **Rounding Protection:** Implements OpenZeppelin-style rounding strategy
+- **Inflation Protection:** Virtual assets/shares prevent first-depositor attacks
+- **Events:** `VaultDepositEvent`, `VaultMintEvent`, `VaultWithdrawEvent`, `VaultRedeemEvent`
+
+## Development Workflow
+
+**Test & Deploy:**
+
+```bash
+cd packages/vault-core
+./sh_scripts/test.sh       # Run Move tests
+./sh_scripts/deploy.sh     # Deploy to network
+```
+
+**Create Vault:**
+
+```bash
+cd packages/scripts-only
+./sh_scripts/run_create_vault.sh  # Execute creation script
+```
+
+## Configuration
+
+- **Addresses:** `vault_core_addr = "_"` (mainnet), `0x999` (dev)
+- **Dependencies:** AptosFramework (mainnet), VaultCore (local)
+- **Language:** Move 2.2 with function values
+
+## Common Tasks
+
+**Add new functions:** Edit `vault_token.move`, update `VaultFunctions` struct, add default implementations
+
+**Create custom vault:** Use `create_vault()` with function value parameters for custom behavior
+
+**DeFi Integration:** Single contract interface works with all vaults:
 
 ```move
-// Single contract integration - works with ALL vaults
-module defi_protocol {
-    public fun integrate_with_vault(
-        user: &signer,
-        vault_token: Object<Metadata>
-    ) {
-        // Get vault info
-        let underlying = vault_token::asset(vault_token);
-        let total_assets = vault_token::total_assets(vault_token);
-
-        // Deposit into vault
-        let shares = vault_token::deposit(user, underlying, vault_token, amount);
-
-        // Later: withdraw from vault
-        let withdrawn = vault_token::withdraw(user, underlying, vault_token, amount, receiver);
-    }
-}
+let shares = vault_token::deposit(user, underlying, vault_token, assets);
 ```
 
-### Advantages for DeFi Ecosystem
-1. **Single Integration Point:** Learn one interface, work with all vaults
-2. **Predictable Behavior:** All vaults follow ERC-4626 standard
-3. **Easy Discovery:** Query one contract for all available vaults
-4. **Cost Efficiency:** No need to track multiple contract addresses
-5. **Consistent Events:** Standardized event structure across all vaults
+## Error Handling
 
-## Technical Notes
+- `ERR_UNDERLYING_TOKEN_MISMATCH: u64 = 1`
+- `ERR_EXCEEDED_MAX_DEPOSIT: u64 = 2`
+- `ERR_EXCEEDED_MAX_MINT: u64 = 3`
+- `ERR_EXCEEDED_MAX_WITHDRAW: u64 = 4`
+- `ERR_INSUFFICIENT_SHARES: u64 = 5`
+- `ERR_EXCEEDED_MAX_REDEEM: u64 = 6`
 
-- Uses Aptos Framework's `fungible_asset` and `primary_fungible_store`
-- Implements ERC-4626 standard adapted for Move/Aptos
-- Uses object-based approach for vault tokens
-- Supports customization through lambda functions
-- Language version 2.2 for latest Move features
+## Key Files for Development
 
-## Key Files to Monitor
-
-**Core Implementation:**
-- `packages/vault-core/sources/vault_token.move` - Main vault implementation
-- `packages/vault-core/tests/test_end_to_end.move` - Test coverage
-- `packages/vault-core/Move.toml` - Core package configuration
-
-**Integration & Scripts:**
-- `packages/scripts-only/scripts/create_vault.move` - Vault creation script
-- `packages/scripts-only/sh_scripts/run_create_vault.sh` - Script execution helper
-- `packages/scripts-only/Move.toml` - Scripts package configuration
-
-**Development:**
-- `packages/vault-core/contract_address.txt` - Deployed contract address
-- `packages/*/sh_scripts/` - Development and deployment scripts
+- `packages/vault-core/sources/vault_token.move` - Main implementation
+- `packages/scripts-only/scripts/create_vault.move` - Creation example
+- `packages/vault-core/contract_address.txt` - Deploy address
+- `packages/*/sh_scripts/` - All development commands
