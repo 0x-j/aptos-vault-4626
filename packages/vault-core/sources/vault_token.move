@@ -4,7 +4,7 @@ module vault_core_addr::vault_token {
     use std::math64;
 
     use aptos_framework::event;
-    use aptos_framework::object::{Self, Object, ExtendRef};
+    use aptos_framework::object::{Self, Object, ExtendRef, ObjectGroup};
     use aptos_framework::timestamp;
     use aptos_framework::fungible_asset::{
         Self,
@@ -42,11 +42,13 @@ module vault_core_addr::vault_token {
         Expand // Away from zero
     }
 
+    #[resource_group_member(group = ObjectGroup)]
     struct VaultState has key {
         underlying_token: Object<Metadata>,
         underlying_total_amount: u64
     }
 
+    #[resource_group_member(group = ObjectGroup)]
     struct VaultFunctions has key {
         convert_to_assets: |Object<Metadata>, u64| u64 has store + copy + drop,
         convert_to_shares: |Object<Metadata>, u64| u64 has store + copy + drop,
@@ -60,6 +62,7 @@ module vault_core_addr::vault_token {
         max_redeem: |Object<Metadata>, address| u64 has store + copy + drop
     }
 
+    #[resource_group_member(group = ObjectGroup)]
     struct VaultController has key {
         extend_ref: ExtendRef,
         transfer_ref: TransferRef,
