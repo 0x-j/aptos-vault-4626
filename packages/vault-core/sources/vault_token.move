@@ -44,7 +44,7 @@ module vault_core_addr::vault_token {
 
     struct VaultState has key, store {
         underlying_token: Object<Metadata>,
-        total_underlying: u64
+        underlying_total_amount: u64
     }
 
     struct VaultFunctions has key, store {
@@ -166,7 +166,7 @@ module vault_core_addr::vault_token {
 
         move_to(
             vault_token_signer,
-            VaultState { underlying_token, total_underlying: 0 }
+            VaultState { underlying_token, underlying_total_amount: 0 }
         );
         move_to(
             vault_token_signer,
@@ -247,7 +247,7 @@ module vault_core_addr::vault_token {
         assert!(assets <= max_assets, ERR_EXCEEDED_MAX_DEPOSIT);
 
         primary_fungible_store::transfer(sender, underlying_token, vault_addr, assets);
-        vault_state.total_underlying += assets;
+        vault_state.underlying_total_amount += assets;
 
         let shares = preview_deposit(vault_token, assets);
         let vault_controller =
@@ -290,7 +290,7 @@ module vault_core_addr::vault_token {
         let assets = preview_mint(vault_token, shares);
 
         primary_fungible_store::transfer(sender, underlying_token, vault_addr, assets);
-        vault_state.total_underlying += assets;
+        vault_state.underlying_total_amount += assets;
 
         let vault_controller =
             borrow_global<VaultController>(object::object_address(&vault_token));
@@ -346,7 +346,7 @@ module vault_core_addr::vault_token {
         );
 
         // Update vault state
-        vault_state.total_underlying -= assets;
+        vault_state.underlying_total_amount -= assets;
 
         // Transfer assets to receiver
         let vault_signer =
@@ -402,7 +402,7 @@ module vault_core_addr::vault_token {
         );
 
         // Update vault state
-        vault_state.total_underlying -= assets;
+        vault_state.underlying_total_amount -= assets;
 
         // Transfer assets to receiver
         let vault_signer =
@@ -438,7 +438,7 @@ module vault_core_addr::vault_token {
     #[view]
     public fun total_assets(vault_token: Object<Metadata>): u64 acquires VaultState {
         let vault_state = borrow_global<VaultState>(object::object_address(&vault_token));
-        vault_state.total_underlying
+        vault_state.underlying_total_amount
     }
 
     #[view]
@@ -601,7 +601,7 @@ module vault_core_addr::vault_token {
         vault_token: Object<Metadata>, assets: u64, rounding: Rounding
     ): u64 acquires VaultState {
         let vault_state = borrow_global<VaultState>(object::object_address(&vault_token));
-        let total_assets = vault_state.total_underlying;
+        let total_assets = vault_state.underlying_total_amount;
         if (total_assets == 0) {
             return assets;
         };
@@ -623,7 +623,7 @@ module vault_core_addr::vault_token {
         vault_token: Object<Metadata>, shares: u64, rounding: Rounding
     ): u64 acquires VaultState {
         let vault_state = borrow_global<VaultState>(object::object_address(&vault_token));
-        let total_assets = vault_state.total_underlying;
+        let total_assets = vault_state.underlying_total_amount;
         if (total_assets == 0) {
             return shares;
         };
