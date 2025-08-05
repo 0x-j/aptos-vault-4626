@@ -42,12 +42,12 @@ module vault_core_addr::vault_token {
         Expand // Away from zero
     }
 
-    struct VaultState has key, store {
+    struct VaultState has key {
         underlying_token: Object<Metadata>,
         underlying_total_amount: u64
     }
 
-    struct VaultFunctions has key, store {
+    struct VaultFunctions has key {
         convert_to_assets: |Object<Metadata>, u64| u64 has store + copy + drop,
         convert_to_shares: |Object<Metadata>, u64| u64 has store + copy + drop,
         preview_deposit: |Object<Metadata>, u64| u64 has store + copy + drop,
@@ -60,7 +60,7 @@ module vault_core_addr::vault_token {
         max_redeem: |Object<Metadata>, address| u64 has store + copy + drop
     }
 
-    struct VaultController has key, store {
+    struct VaultController has key {
         extend_ref: ExtendRef,
         transfer_ref: TransferRef,
         mint_ref: MintRef,
