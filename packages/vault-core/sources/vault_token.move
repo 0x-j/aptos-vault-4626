@@ -12,7 +12,8 @@ module vault_core_addr::vault_token {
         Metadata,
         TransferRef,
         MintRef,
-        BurnRef
+        BurnRef,
+        FungibleStore
     };
     use aptos_framework::primary_fungible_store;
     use aptos_framework::option::{Self, Option};
@@ -28,10 +29,8 @@ module vault_core_addr::vault_token {
     const ERR_EXCEEDED_MAX_MINT: u64 = 3;
     /// Exceeded max withdraw
     const ERR_EXCEEDED_MAX_WITHDRAW: u64 = 4;
-    /// Insufficient shares
-    const ERR_INSUFFICIENT_SHARES: u64 = 5;
     /// Exceeded max redeem
-    const ERR_EXCEEDED_MAX_REDEEM: u64 = 6;
+    const ERR_EXCEEDED_MAX_REDEEM: u64 = 5;
 
     const MAX_U64: u64 = 18446744073709551615;
 
@@ -236,198 +235,158 @@ module vault_core_addr::vault_token {
     }
 
     public fun deposit(
-        sender: &signer,
-        underlying_token: Object<Metadata>,
-        vault_token: Object<Metadata>,
-        assets: u64
-    ): u64 acquires VaultState, VaultFunctions, VaultController {
+        sender: &signer, underlying_token: FungibleAsset, vault_token: Object<Metadata>
+    ): FungibleAsset acquires VaultState, VaultFunctions, VaultController {
         let sender_addr = signer::address_of(sender);
+        let underlying_metadata = fungible_asset::asset_metadata(&underlying_token);
+        let underlying_assets = fungible_asset::amount(&underlying_token);
         let vault_addr = object::object_address(&vault_token);
         let vault_state = borrow_global_mut<VaultState>(vault_addr);
-        assert_underlying_token_is_matched(underlying_token, vault_state);
+        assert_underlying_token_is_matched(underlying_metadata, vault_state);
 
         let max_assets = max_deposit(vault_token, sender_addr);
-        assert!(assets <= max_assets, ERR_EXCEEDED_MAX_DEPOSIT);
+        assert!(underlying_assets <= max_assets, ERR_EXCEEDED_MAX_DEPOSIT);
 
-        primary_fungible_store::transfer(sender, underlying_token, vault_addr, assets);
-        vault_state.underlying_total_amount += assets;
+        primary_fungible_store::deposit(vault_addr, underlying_token);
+        vault_state.underlying_total_amount += underlying_assets;
 
-        let shares = preview_deposit(vault_token, assets);
-        let vault_controller =
-            borrow_global<VaultController>(object::object_address(&vault_token));
-        fungible_asset::mint_to(
-            &vault_controller.mint_ref,
-            primary_fungible_store::ensure_primary_store_exists(
-                sender_addr, vault_token
-            ),
-            shares
-        );
+        let shares = preview_deposit(vault_token, underlying_assets);
+        let vault_controller = borrow_global<VaultController>(vault_addr);
+        let minted_shares = fungible_asset::mint(&vault_controller.mint_ref, shares);
 
         event::emit(
             VaultDepositEvent {
                 sender: sender_addr,
                 vault_token,
-                underlying_token,
-                assets,
+                underlying_token: underlying_metadata,
+                assets: underlying_assets,
                 shares
             }
         );
 
-        shares
+        minted_shares
     }
 
     public fun mint(
         sender: &signer,
-        underlying_token: Object<Metadata>,
+        underlying_store: Object<FungibleStore>,
         vault_token: Object<Metadata>,
         shares: u64
-    ): u64 acquires VaultState, VaultFunctions, VaultController {
+    ): FungibleAsset acquires VaultState, VaultFunctions, VaultController {
         let sender_addr = signer::address_of(sender);
+        let underlying_metadata = fungible_asset::store_metadata(underlying_store);
         let vault_addr = object::object_address(&vault_token);
         let vault_state = borrow_global_mut<VaultState>(vault_addr);
-        assert_underlying_token_is_matched(underlying_token, vault_state);
+        assert_underlying_token_is_matched(underlying_metadata, vault_state);
 
         let max_shares = max_mint(vault_token, sender_addr);
         assert!(shares <= max_shares, ERR_EXCEEDED_MAX_MINT);
 
         let assets = preview_mint(vault_token, shares);
-
-        primary_fungible_store::transfer(sender, underlying_token, vault_addr, assets);
+        fungible_asset::transfer(
+            sender,
+            underlying_store,
+            primary_fungible_store::ensure_primary_store_exists(
+                vault_addr, underlying_metadata
+            ),
+            assets
+        );
         vault_state.underlying_total_amount += assets;
 
         let vault_controller =
             borrow_global<VaultController>(object::object_address(&vault_token));
-        fungible_asset::mint_to(
-            &vault_controller.mint_ref,
-            primary_fungible_store::ensure_primary_store_exists(
-                sender_addr, vault_token
-            ),
-            shares
-        );
+        let minted_shares = fungible_asset::mint(&vault_controller.mint_ref, shares);
 
         event::emit(
             VaultMintEvent {
                 sender: sender_addr,
                 vault_token,
-                underlying_token,
+                underlying_token: vault_state.underlying_token,
                 assets,
                 shares
             }
         );
 
-        assets
+        minted_shares
     }
 
     public fun withdraw(
-        sender: &signer,
-        underlying_token: Object<Metadata>,
-        vault_token: Object<Metadata>,
-        assets: u64,
-        receiver: address
-    ): u64 acquires VaultState, VaultFunctions, VaultController {
+        sender: &signer, vault_store: Object<FungibleStore>, assets: u64
+    ): FungibleAsset acquires VaultState, VaultFunctions, VaultController {
         let sender_addr = signer::address_of(sender);
-        let vault_addr = object::object_address(&vault_token);
+        let vault_metadata = fungible_asset::store_metadata(vault_store);
+        let vault_addr = object::object_address(&vault_metadata);
         let vault_state = borrow_global_mut<VaultState>(vault_addr);
-        assert_underlying_token_is_matched(underlying_token, vault_state);
+        let underlying_metadata = vault_state.underlying_token;
 
-        let max_assets = max_withdraw(vault_token, sender_addr);
+        let max_assets = max_withdraw(vault_metadata, sender_addr);
         assert!(assets <= max_assets, ERR_EXCEEDED_MAX_WITHDRAW);
 
-        let shares = preview_withdraw(vault_token, assets);
-
-        // Check if sender has enough shares
-        let sender_balance = primary_fungible_store::balance(sender_addr, vault_token);
-        assert!(sender_balance >= shares, ERR_INSUFFICIENT_SHARES);
+        let shares = preview_withdraw(vault_metadata, assets);
 
         // Burn shares from sender
-        let vault_controller =
-            borrow_global<VaultController>(object::object_address(&vault_token));
-        fungible_asset::burn_from(
-            &vault_controller.burn_ref,
-            primary_fungible_store::primary_store(sender_addr, vault_token),
-            shares
-        );
-
-        // Update vault state
-        vault_state.underlying_total_amount -= assets;
+        let vault_controller = borrow_global<VaultController>(vault_addr);
+        fungible_asset::burn_from(&vault_controller.burn_ref, vault_store, shares);
 
         // Transfer assets to receiver
         let vault_signer =
             &object::generate_signer_for_extending(&vault_controller.extend_ref);
-        primary_fungible_store::transfer(
-            vault_signer,
-            underlying_token,
-            receiver,
-            assets
-        );
+        let withdraw_assets =
+            primary_fungible_store::withdraw(vault_signer, underlying_metadata, assets);
+        // Update vault state
+        vault_state.underlying_total_amount -= assets;
 
         event::emit(
             VaultWithdrawEvent {
                 sender: sender_addr,
-                vault_token,
-                underlying_token,
+                vault_token: vault_metadata,
+                underlying_token: underlying_metadata,
                 assets,
                 shares
             }
         );
 
-        shares
+        withdraw_assets
     }
 
     public fun redeem(
-        sender: &signer,
-        underlying_token: Object<Metadata>,
-        vault_token: Object<Metadata>,
-        shares: u64,
-        receiver: address
-    ): u64 acquires VaultState, VaultFunctions, VaultController {
+        sender: &signer, vault_token: FungibleAsset
+    ): FungibleAsset acquires VaultState, VaultFunctions, VaultController {
         let sender_addr = signer::address_of(sender);
-        let vault_addr = object::object_address(&vault_token);
+        let vault_metadata = fungible_asset::asset_metadata(&vault_token);
+        let vault_shares = fungible_asset::amount(&vault_token);
+        let vault_addr = object::object_address(&vault_metadata);
         let vault_state = borrow_global_mut<VaultState>(vault_addr);
-        assert_underlying_token_is_matched(underlying_token, vault_state);
+        let underlying_metadata = vault_state.underlying_token;
 
-        let max_shares = max_redeem(vault_token, sender_addr);
-        assert!(shares <= max_shares, ERR_EXCEEDED_MAX_REDEEM);
+        let max_shares = max_redeem(vault_metadata, sender_addr);
+        assert!(vault_shares <= max_shares, ERR_EXCEEDED_MAX_REDEEM);
 
-        // Check if sender has enough shares
-        let sender_balance = primary_fungible_store::balance(sender_addr, vault_token);
-        assert!(sender_balance >= shares, ERR_INSUFFICIENT_SHARES);
-
-        let assets = preview_redeem(vault_token, shares);
+        let assets = preview_redeem(vault_metadata, vault_shares);
 
         // Burn shares from sender
-        let vault_controller =
-            borrow_global<VaultController>(object::object_address(&vault_token));
-        fungible_asset::burn_from(
-            &vault_controller.burn_ref,
-            primary_fungible_store::primary_store(sender_addr, vault_token),
-            shares
-        );
-
-        // Update vault state
-        vault_state.underlying_total_amount -= assets;
+        let vault_controller = borrow_global<VaultController>(vault_addr);
+        fungible_asset::burn(&vault_controller.burn_ref, vault_token);
 
         // Transfer assets to receiver
         let vault_signer =
             &object::generate_signer_for_extending(&vault_controller.extend_ref);
-        primary_fungible_store::transfer(
-            vault_signer,
-            underlying_token,
-            receiver,
-            assets
-        );
+        let withdraw_assets =
+            primary_fungible_store::withdraw(vault_signer, underlying_metadata, assets);
+        // Update vault state
+        vault_state.underlying_total_amount -= assets;
 
         event::emit(
             VaultRedeemEvent {
                 sender: sender_addr,
-                vault_token,
-                underlying_token,
+                vault_token: vault_metadata,
+                underlying_token: underlying_metadata,
                 assets,
-                shares
+                shares: vault_shares
             }
         );
 
-        assets
+        withdraw_assets
     }
 
     // ======================== Read Functions ========================

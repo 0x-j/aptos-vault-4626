@@ -22,11 +22,13 @@ Complete ERC-4626 implementation on Aptos with function value customization and 
 ## Reference Implementation
 
 **OpenZeppelin ERC-4626:** https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC20/extensions/ERC4626.sol?utm_source=chatgpt.com
+
 - Use this as the canonical reference for ERC-4626 behavior
 - Our implementation follows the same rounding strategies and security patterns
 - Function signatures adapted for Move language and Aptos architecture
 
 **Move Function Values:** https://aptos.dev/build/smart-contracts/book/functions#function-values
+
 - Core Move feature enabling function customization per vault
 - Allows each vault to override default behavior without contract inheritance
 
@@ -44,16 +46,18 @@ Complete ERC-4626 implementation on Aptos with function value customization and 
 
 ```move
 // Core Operations
-create_vault() - Factory with function value customization
-deposit(assets) → shares - Floor rounding (user-favorable)
-mint(shares) → assets - Ceil rounding (protocol-favorable)
-withdraw(assets, receiver) → shares - Ceil rounding
-redeem(shares, receiver) → assets - Floor rounding
+create_vault(sender, underlying_token, custom_functions...) - Factory with function value customization
+deposit(sender, underlying_token: FungibleAsset, vault_token) → FungibleAsset - Floor rounding
+mint(sender, underlying_store: Object<FungibleStore>, vault_token, shares) → FungibleAsset - Ceil rounding
+withdraw(sender, vault_store: Object<FungibleStore>, assets) → FungibleAsset - Ceil rounding
+redeem(sender, vault_token: FungibleAsset) → FungibleAsset - Floor rounding
 
 // View Functions
-convert_to_shares/assets() - Conversion utilities
+convert_to_shares(vault_token, assets) → u64 - Conversion utilities
+convert_to_assets(vault_token, shares) → u64 - Conversion utilities
 max_*() / preview_*() - Limits and previews with custom logic
-asset() / total_assets() - Basic vault info
+asset(vault_token) → Object<Metadata> - Get underlying token
+total_assets(vault_token) → u64 - Total underlying assets in vault
 ```
 
 **Key Features:**
@@ -104,8 +108,7 @@ let shares = vault_token::deposit(user, underlying, vault_token, assets);
 - `ERR_EXCEEDED_MAX_DEPOSIT: u64 = 2`
 - `ERR_EXCEEDED_MAX_MINT: u64 = 3`
 - `ERR_EXCEEDED_MAX_WITHDRAW: u64 = 4`
-- `ERR_INSUFFICIENT_SHARES: u64 = 5`
-- `ERR_EXCEEDED_MAX_REDEEM: u64 = 6`
+- `ERR_EXCEEDED_MAX_REDEEM: u64 = 5`
 
 ## Key Files for Development
 
