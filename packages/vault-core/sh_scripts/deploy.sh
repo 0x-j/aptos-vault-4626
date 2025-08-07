@@ -14,7 +14,7 @@ OUTPUT=$(aptos move create-object-and-publish-package \
   --address-name vault_core_addr \
   --named-addresses vault_core_addr=$PUBLISHER_ADDR \
   --profile $PUBLISHER_PROFILE \
-	--assume-yes)
+	--language-version 2.2 --assume-yes)
 
 # Extract the published contract address and save it to a file
 echo "$OUTPUT" | grep "Code was successfully deployed to object address" | awk '{print $NF}' | sed 's/\.$//' > contract_address.txt

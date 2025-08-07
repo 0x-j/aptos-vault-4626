@@ -1,15 +1,15 @@
 [package]
-name = "ScriptsOnly"
+name = "DummyVault"
 version = "1.0.0"
 authors = []
 
 [addresses]
-dummy_addr = "_"
+dummy_vault_addr = "_"
 vault_core_addr = "_"
 
 [dev-addresses]
-dummy_addr = "0x999"
-vault_core_addr = "0x999"
+dummy_vault_addr = "0x999"
+vault_core_addr = "0x998"
 
 [dependencies]
 AptosFramework = { git = "https://github.com/aptos-labs/aptos-framework.git", rev = "mainnet", subdir = "aptos-framework" }

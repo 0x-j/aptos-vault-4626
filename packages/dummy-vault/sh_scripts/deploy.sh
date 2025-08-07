@@ -10,11 +10,14 @@ PUBLISHER_PROFILE=testnet-profile-1
 
 PUBLISHER_ADDR=0x$(aptos config show-profiles --profile=$PUBLISHER_PROFILE | grep 'account' | sed -n 's/.*"account": \"\(.*\)\".*/\1/p')
 
+VAULT_CORE_ADDR=$(cat ../vault-core/contract_address.txt)
+echo "Vault core address: $VAULT_CORE_ADDR"
+
 OUTPUT=$(aptos move create-object-and-publish-package \
-  --address-name vault_core_addr \
-  --named-addresses vault_core_addr=$PUBLISHER_ADDR \
+  --address-name dummy_vault_addr \
+  --named-addresses dummy_vault_addr=$PUBLISHER_ADDR,vault_core_addr=$VAULT_CORE_ADDR \
   --profile $PUBLISHER_PROFILE \
-	--assume-yes)
+  --language-version 2.2 --assume-yes)
 
 # Extract the published contract address and save it to a file
 echo "$OUTPUT" | grep "Code was successfully deployed to object address" | awk '{print $NF}' | sed 's/\.$//' > contract_address.txt

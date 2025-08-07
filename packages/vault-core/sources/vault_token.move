@@ -1,11 +1,10 @@
 module vault_core_addr::vault_token {
     use std::signer;
-    use std::string::{Self, String};
     use std::math64;
 
+    use aptos_framework::string;
     use aptos_framework::event;
-    use aptos_framework::object::{Self, Object, ExtendRef, ObjectGroup};
-    use aptos_framework::timestamp;
+    use aptos_framework::object::{Self, Object, ExtendRef, ObjectGroup, ConstructorRef};
     use aptos_framework::fungible_asset::{
         Self,
         FungibleAsset,
@@ -18,8 +17,6 @@ module vault_core_addr::vault_token {
     use aptos_framework::primary_fungible_store;
     use aptos_framework::option::{Self, Option};
     use aptos_framework::string_utils;
-    use aptos_framework::function_info;
-    use aptos_framework::dispatchable_fungible_asset;
 
     /// Underlying token mismatch
     const ERR_UNDERLYING_TOKEN_MISMATCH: u64 = 1;
@@ -31,6 +28,8 @@ module vault_core_addr::vault_token {
     const ERR_EXCEEDED_MAX_WITHDRAW: u64 = 4;
     /// Exceeded max redeem
     const ERR_EXCEEDED_MAX_REDEEM: u64 = 5;
+    /// Not the store owner
+    const ERR_NOT_STORE_OWNER: u64 = 6;
 
     const MAX_U64: u64 = 18446744073709551615;
 
@@ -131,8 +130,9 @@ module vault_core_addr::vault_token {
         custom_max_mint: Option<|Object<Metadata>, address| u64 has store + copy + drop>,
         custom_max_withdraw: Option<|Object<Metadata>, address| u64 has store + copy + drop>,
         custom_max_redeem: Option<|Object<Metadata>, address| u64 has store + copy + drop>
-    ) {
-        let vault_token_constructor_ref = &object::create_object(@vault_core_addr);
+    ): ConstructorRef {
+        let vault_token_constructor = object::create_sticky_object(@vault_core_addr);
+        let vault_token_constructor_ref = &vault_token_constructor;
         let vault_token_signer = &object::generate_signer(vault_token_constructor_ref);
         primary_fungible_store::create_primary_store_enabled_fungible_asset(
             vault_token_constructor_ref,
@@ -143,27 +143,6 @@ module vault_core_addr::vault_token {
             6,
             string::utf8(b"icon_url"),
             string::utf8(b"project_url")
-        );
-
-        // Override the deposit and withdraw function
-        let custom_withdraw =
-            function_info::new_function_info(
-                sender,
-                string::utf8(b"vault_token"),
-                string::utf8(b"custom_withdraw")
-            );
-        let custom_deposit =
-            function_info::new_function_info(
-                sender,
-                string::utf8(b"vault_token"),
-                string::utf8(b"custom_deposit")
-            );
-
-        dispatchable_fungible_asset::register_dispatch_functions(
-            vault_token_constructor_ref,
-            option::some(custom_withdraw),
-            option::some(custom_deposit),
-            option::none()
         );
 
         move_to(
@@ -220,18 +199,8 @@ module vault_core_addr::vault_token {
                 underlying_token
             }
         );
-    }
 
-    public fun custom_withdraw<T: key>(
-        store: Object<T>, amount: u64, transfer_ref: &TransferRef
-    ): FungibleAsset {
-        fungible_asset::withdraw_with_ref(transfer_ref, store, amount)
-    }
-
-    public fun custom_deposit<T: key>(
-        store: Object<T>, fa: FungibleAsset, transfer_ref: &TransferRef
-    ) {
-        fungible_asset::deposit_with_ref(transfer_ref, store, fa);
+        vault_token_constructor
     }
 
     public fun deposit(
@@ -274,6 +243,8 @@ module vault_core_addr::vault_token {
         shares: u64
     ): FungibleAsset acquires VaultState, VaultFunctions, VaultController {
         let sender_addr = signer::address_of(sender);
+        assert!(object::is_owner(underlying_store, sender_addr), ERR_NOT_STORE_OWNER);
+
         let underlying_metadata = fungible_asset::store_metadata(underlying_store);
         let vault_addr = object::object_address(&vault_token);
         let vault_state = borrow_global_mut<VaultState>(vault_addr);
@@ -314,6 +285,8 @@ module vault_core_addr::vault_token {
         sender: &signer, vault_store: Object<FungibleStore>, assets: u64
     ): FungibleAsset acquires VaultState, VaultFunctions, VaultController {
         let sender_addr = signer::address_of(sender);
+        assert!(object::is_owner(vault_store, sender_addr), ERR_NOT_STORE_OWNER);
+
         let vault_metadata = fungible_asset::store_metadata(vault_store);
         let vault_addr = object::object_address(&vault_metadata);
         let vault_state = borrow_global_mut<VaultState>(vault_addr);
@@ -623,6 +596,9 @@ module vault_core_addr::vault_token {
     }
 
     // ========================= Unit Tests Helper ================================== //
+
+    #[test_only]
+    use aptos_framework::timestamp;
 
     #[test_only]
     public fun init_module_for_test(
